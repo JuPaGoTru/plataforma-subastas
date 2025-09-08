@@ -15,23 +15,33 @@ Los usuarios pueden ofertar por ítems (cartas de eFootball en este caso), y el 
 ---
 
 ## 📂 Estructura del proyecto
-```Subastas/
-│── bids/ # Aplicación principal de subastas
-│ ├── migrations/
-│ ├── templates/ # Plantillas HTML
-│ ├── static/ # Archivos estáticos
-│ ├── routing.py # Rutas para Channels
-│ ├── consumers.py # Lógica de WebSockets
-│ ├── views.py # Vistas HTTP
-│ └── models.py # Modelos principales (Subasta, Oferta, Item, etc.)
-│
-├── Subastas/ # Configuración global de Django
-│ ├── settings.py
-│ ├── urls.py
-│ └── asgi.py # Configuración de ASGI para Channels
-│
+```
+subastas_project/
+├── .gitignore
+├── requirements.txt
 ├── manage.py
-└── requirements.txt
+├── auction_site/
+│   ├── __init__.py
+│   ├── settings.py
+│   ├── urls.py
+│   ├── asgi.py
+│   └── wsgi.py
+├── bids/
+│   ├── __init__.py
+│   ├── admin.py
+│   ├── apps.py
+│   ├── models.py
+│   ├── tests.py
+│   ├── views.py
+│   ├── urls.py
+│   └── middleware.py
+├── templates/
+│   ├── base.html
+│   ├── index.html
+│   ├── product_detail.html
+│   ├── join_auction.html
+│   └── change_username.html
+
 ```
 ---
 
