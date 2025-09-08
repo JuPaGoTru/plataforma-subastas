@@ -15,7 +15,7 @@ Los usuarios pueden ofertar por ítems (cartas de eFootball en este caso), y el 
 ---
 
 ## 📂 Estructura del proyecto
-Subastas/
+```Subastas/
 │── bids/ # Aplicación principal de subastas
 │ ├── migrations/
 │ ├── templates/ # Plantillas HTML
@@ -32,7 +32,7 @@ Subastas/
 │
 ├── manage.py
 └── requirements.txt
-
+```
 ---
 
 ## ⚙️ Instalación y configuración
