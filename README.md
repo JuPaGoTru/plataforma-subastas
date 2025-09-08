@@ -49,7 +49,7 @@ subastas_project/
 
 ### 1. Clonar el repositorio
 ```bash
-git clone https://github.com/tu-usuario/subastas.git
+git clone https://github.com/JuPaGoTru/plataforma-subastas.git
 cd subastas
 ```
 
