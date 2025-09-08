@@ -88,10 +88,6 @@ Python 3.x
 
 Django
 
-Django Channels
-
-WebSockets
-
 HTML, CSS, JavaScript
 
 ## 📌 Próximas mejoras
@@ -104,7 +100,7 @@ Implementar notificaciones push en tiempo real.
 Añadir autenticación de usuarios para personalizar la experiencia de puja.
 
 ## 👨‍💻 Autor
-Proyecto desarrollado por [Tu Nombre].
+Proyecto desarrollado por Juan Pablo Gonzalez.
 Este repositorio está pensado como base para sistemas de subastas en tiempo real, adaptable a múltiples escenarios.
 
 
