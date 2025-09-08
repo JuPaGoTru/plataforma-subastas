@@ -1,0 +1,48 @@
+{% extends 'base.html' %}
+
+{% block content %}
+<div class="row justify-content-center">
+    <div class="col-md-6">
+        <div class="card">
+            <div class="card-header text-center">
+                <h2>Cambiar nombre de usuario EQUPO DE LIGA MASTER</h2>
+                <h4>{{ product.name }}</h4>
+            </div>
+            <div class="card-body">
+                <div class="text-center mb-4">
+                    <img src="{{ product.image.url }}" class="img-fluid rounded" alt="{{ product.name }}" style="max-height: 200px;">
+                </div>
+                
+                {% if error %}
+                <div class="alert alert-danger">{{ error }}</div>
+                {% endif %}
+                
+                <div class="alert alert-info">
+                    <p>Nombre actual: <strong>{{ request.session.username }}</strong></p>
+                </div>
+                
+                <form method="post">
+                    {% csrf_token %}
+                    <div class="mb-3">
+                        <label for="new_username" class="form-label">Nuevo nombre de usuario:</label>
+                        <input type="text" class="form-control form-control-lg" id="new_username" name="new_username" required autofocus>
+                        <div class="form-text">Este nombre se mostrará cuando realices pujas y mensajes.</div>
+                    </div>
+                    
+                    <div class="d-grid gap-2">
+                        <button type="submit" class="btn btn-primary btn-lg">Cambiar nombre</button>
+                        <a href="{% url 'product_detail' product.id %}" class="btn btn-outline-secondary">Cancelar</a>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+document.getElementById('new_username').addEventListener('input', function() {
+    // Validación básica: solo letras, números y algunos caracteres especiales
+    this.value = this.value.replace(/[^a-zA-Z0-9áéíóúÁÉÍÓÚñÑ_\- ]/g, '');
+});
+</script>
+{% endblock %}

@@ -1,0 +1,800 @@
+{% extends 'base.html' %}
+{% load static %}
+
+{% block content %}
+<div class="row">
+    <div class="col-md-6">
+        <div class="card">
+            <img src="{{ product.image.url }}" class="card-img-top" alt="{{ product.name }}">
+            <div class="card-body">
+                <div class="d-flex justify-content-between align-items-center mb-3">
+                    <h2 class="card-title mb-0">{{ product.name }}</h2>
+                    {% if username %}
+                    <div class="dropdown">
+                        <button class="btn btn-outline-secondary btn-sm dropdown-toggle" type="button" data-bs-toggle="dropdown">
+                            👤 {{ username }}
+                        </button>
+                        <ul class="dropdown-menu">
+                            <li>
+                                <a class="dropdown-item" href="{% url 'change_username' product.id %}">
+                                    ✏️ Cambiar nombre
+                                </a>
+                            </li>
+                            <li>
+                                <form method="post" action="{% url 'logout_guest' product.id %}" class="d-inline">
+                                    {% csrf_token %}
+                                    <button type="submit" class="dropdown-item">🚪 Salir</button>
+                                </form>
+                            </li>
+                        </ul>
+                    </div>
+                    {% endif %}
+                </div>
+                
+                <div class="alert alert-info">
+                    <h4 class="mb-0">Precio actual: $<span id="current-price-display">{{ product.current_price }}</span></h4>
+                    <small class="text-muted" id="current-price" style="display: none;">{{ product.current_price }}</small>
+                </div>
+
+                <!-- Alerta de anti-sniping (inicialmente oculta) -->
+                <div id="anti-sniping-alert" class="alert alert-warning mt-3" style="display: none;">
+                    <h5>⚡ Modo Anti-Sniping Activado</h5>
+                    <p class="mb-0">Solo se aceptan pujas de $1,000,000 o más. La subasta se extenderá 30 segundos con cada puja válida.</p>
+                </div>
+                
+                {% if product.is_finished %}
+                <!-- SUBASTA FINALIZADA - MOSTRAR GANADOR -->
+                <div class="alert alert-success mt-3">
+                    <h4>🎉 ¡Subasta finalizada!</h4>
+                    {% if product.winner %}
+                    <p class="mb-1"><strong>Ganador:</strong> {{ product.winner }}</p>
+                    <p class="mb-0"><strong>Precio final:</strong> ${{ product.current_price }}</p>
+                    {% else %}
+                    <p>No hubo pujas en esta subasta.</p>
+                    {% endif %}
+                </div>
+
+                {% elif product.is_upcoming %}
+                <!-- SUBASTA PROGRAMADA -->
+                <div class="alert alert-warning mt-3">
+                    <h4>⏰ Subasta programada</h4>
+                    <p class="mb-1"><strong>Precio inicial:</strong> ${{ product.starting_price }}</p>
+                    <p><strong>Inicia en:</strong> <span id="start_time">{{ product.start_time|date:"c" }}</span></p>
+
+                </div>
+                {% else %}
+                <!-- SUBASTA ACTIVA -->
+                {% if username %}
+                <div class="mt-3">
+                    <h5>Realizar puja:</h5>
+                    
+                    <!-- Botones de puja rápida -->
+                    <div class="row mb-3">
+                        <div class="col-4">
+                            <button id="btn-plus-1" class="btn btn-outline-primary w-100" onclick="quickBid(1)">
+                                +1<br>
+                                <small>$<span id="plus-1">{{ product.current_price|add:1 }}</span></small>
+                            </button>
+                        </div>
+                        <div class="col-4">
+                            <button id="btn-plus-500k" class="btn btn-outline-success w-100" onclick="quickBid(500000)">
+                                +500K<br>
+                                <small>$<span id="plus-500k">{{ product.current_price|add:500000 }}</span></small>
+                            </button>
+                        </div>
+                        <div class="col-4">
+                            <button id="btn-plus-1m" class="btn btn-outline-warning w-100" onclick="quickBid(1000000)">
+                                +1M<br>
+                                <small>$<span id="plus-1m">{{ product.current_price|add:1000000 }}</span></small>
+                            </button>
+                        </div>
+                    </div>
+                    
+                    <!-- Input de puja personalizada -->
+                    <div class="mb-3">
+                        <label for="bid-amount" class="form-label">O ingresa un monto específico:</label>
+                        <div class="input-group">
+                            <span class="input-group-text">$</span>
+                            <input type="text" id="bid-amount" class="form-control" placeholder="Ej: 1.000.000">
+                            <button class="btn btn-primary" onclick="submitBid()">Pujar</button>
+                        </div>
+                        <div id="bid-preview" class="mt-1"></div>
+                        <div class="form-text">
+                            💡 Máximo permitido: $510.000.000
+                        </div>
+                    </div>
+
+                    <div id="cooldown-timer" class="alert alert-secondary mt-2" style="display: none;">
+                        <small>⏰ Puedes hacer otra puja en: <span id="cooldown-seconds">2</span> segundos</small>
+                    </div>
+                    
+                    <div class="alert alert-info">
+                        <p class="mb-1">⏳ <strong>Finaliza en:</strong> <span id="end_time">{{ product.end_time|date:"c" }}</span></p>
+                    </div>
+                </div>
+                {% else %}
+                <div class="alert alert-info mt-3">
+                    <a href="{% url 'join_auction' product.id %}">Ingresa el nombre DE TU EQUIPO DE LIGA MASTER</a> para poder pujar.
+                </div>
+                {% endif %}
+                {% endif %}
+            </div>
+        </div>
+    </div>
+    
+    <div class="col-md-6">
+        <div class="card">
+            <div class="card-header">
+                <h3>{% if product.is_finished %}Historial de pujas{% else %}Últimas pujas{% endif %}</h3>
+            </div>
+            <ul id="bids-list" class="list-group list-group-flush">
+                {% for bid in bids %}
+                <li class="list-group-item {% if bid.guest_user.username == username %}list-group-item-success{% endif %} {% if forloop.first and product.is_finished %}list-group-item-warning{% endif %}">
+                    {% if bid.guest_user.username == username %}
+                    <strong>⭐ {{ bid.guest_user.username }} (Tú)</strong>: ${{ bid.amount }} 
+                    {% else %}
+                    <strong>{{ bid.guest_user.username }}</strong>: ${{ bid.amount }} 
+                    {% endif %}
+                    {% if forloop.first and product.is_finished %}
+                    <span class="badge bg-success float-end">GANADOR</span>
+                    {% endif %}
+                    <span class="text-muted float-end">{{ bid.created_at|time }}</span>
+                </li>
+                {% empty %}
+                <li class="list-group-item text-muted">No hay pujas aún</li>
+                {% endfor %}
+            </ul>
+        </div>
+        
+        <!-- Chat -->
+        <div class="card mt-4">
+            <div class="card-header">
+                <h3>💬 Chat de la subasta</h3>
+            </div>
+            <div class="card-body" style="height: 300px; overflow-y: auto;">
+                <div id="chat-messages"></div>
+            </div>
+            <div class="card-footer">
+                <div class="input-group">
+                    <input type="text" id="chat-input" class="form-control" placeholder="Escribe un mensaje..." {% if not username or product.is_finished %}disabled{% endif %}>
+                    <button class="btn btn-outline-primary" onclick="sendMessage()" {% if not username or product.is_finished %}disabled{% endif %}>Enviar</button>
+                </div>
+                {% if not username %}
+                <small class="text-muted">Ingresa el nombre DE TU EQUIPO DE LIGA MASTER para chatear</small>
+                {% elif product.is_finished %}
+                <small class="text-muted">El chat se ha deshabilitado al finalizar la subasta</small>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    const productId = {{ product.id }};
+    const username = "{{ username }}";
+    let currentPrice = parseInt("{{ product.current_price }}");
+    let updateInterval;
+    let chatInterval;
+    let statusInterval;
+    let antiSnipingActive = false;
+    let bidCooldown = false;
+    let cooldownTimer = null;
+    
+    // Deshabilitar funciones si la subasta está finalizada
+    const isFinished = {{ product.is_finished|yesno:"true,false" }};
+    const MAX_BID = 510000000; // 510 millones
+
+    // Función para formatear números con separadores de miles
+    function formatNumber(number) {
+        return new Intl.NumberFormat('es-CO').format(number);
+    }
+
+    // Función para parsear números con formato
+    function parseFormattedNumber(formattedNumber) {
+        return parseInt(formattedNumber.replace(/\./g, '')) || 0;
+    }
+
+    // Actualizar el display del precio actual
+    function updateCurrentPriceDisplay() {
+        document.getElementById('current-price').innerText = formatNumber(currentPrice);
+        document.getElementById('current-price-display').innerText = formatNumber(currentPrice);
+    }
+
+    // Función para actualizar el valor del input con formato
+    function formatBidInput() {
+        const amountInput = document.getElementById('bid-amount');
+        const formattedValue = formatNumber(parseFormattedNumber(amountInput.value));
+        amountInput.value = formattedValue;
+        
+        // Actualizar el preview de la puja
+        updateBidPreview();
+    }
+
+    // Función para mostrar preview de la puja
+    function updateBidPreview() {
+        const amountInput = document.getElementById('bid-amount');
+        const bidAmount = parseFormattedNumber(amountInput.value);
+        const previewElement = document.getElementById('bid-preview');
+        
+        if (bidAmount > 0) {
+            const increment = bidAmount - currentPrice;
+            
+            if (bidAmount <= currentPrice) {
+                previewElement.innerHTML = `
+                    <div class="text-danger">
+                        <small>❌ Debe ser mayor a $${formatNumber(currentPrice)}</small>
+                    </div>
+                `;
+            } else if (bidAmount > MAX_BID) {
+                previewElement.innerHTML = `
+                    <div class="text-danger">
+                        <small>❌ Máximo permitido: $${formatNumber(MAX_BID)}</small>
+                    </div>
+                `;
+            } else if (antiSnipingActive && increment < 1000000) {
+                const requiredIncrement = 1000000 - increment;
+                previewElement.innerHTML = `
+                    <div class="text-danger">
+                        <small>❌ Modo anti-sniping: Necesitas incrementar $${formatNumber(requiredIncrement)} más para alcanzar el mínimo de $1,000,000</small>
+                    </div>
+                `;
+            } else {
+                previewElement.innerHTML = `
+                    <div class="text-success">
+                        <small>✅ Pujarás: $${formatNumber(bidAmount)} (incremento: $${formatNumber(increment)})</small>
+                    </div>
+                `;
+            }
+        } else {
+            previewElement.innerHTML = '';
+        }
+    }
+
+    // Función para puja rápida
+    function quickBid(increment) {
+        const newBid = currentPrice + increment;
+        
+        if (newBid > MAX_BID) {
+            alert(`No puedes pujar más de $${formatNumber(MAX_BID)}`);
+            return;
+        }
+        
+        // Verificar si está en modo anti-sniping y el incremento es insuficiente
+        if (antiSnipingActive && increment < 1000000) {
+            alert(`Modo anti-sniping activado. El incremento debe ser de al menos $1,000,000 (intentaste incrementar $${formatNumber(increment)})`);
+            return;
+        }
+        
+        // Actualizar el input y hacer la puja
+        document.getElementById('bid-amount').value = formatNumber(newBid);
+        submitBid();
+    }
+
+    // Función para puja automática con incremento
+    function autoBid(increment) {
+        const newBid = currentPrice + increment;
+        
+        if (newBid > MAX_BID) {
+            alert(`No puedes pujar más de $${formatNumber(MAX_BID)}`);
+            return;
+        }
+        
+        // Solo actualizar el input, no enviar automáticamente
+        document.getElementById('bid-amount').value = formatNumber(newBid);
+        updateBidPreview();
+        document.getElementById('bid-amount').focus();
+    }
+    
+    function updateQuickBidButtons() {
+        document.getElementById('plus-1').textContent = formatNumber(currentPrice + 1);
+        document.getElementById('plus-500k').textContent = formatNumber(currentPrice + 500000);
+        document.getElementById('plus-1m').textContent = formatNumber(currentPrice + 1000000);
+    }
+
+    let timeUpdateInterval;
+
+    // Función para actualizar el estado anti-sniping
+    function updateAntiSnipingStatus(status) {
+        antiSnipingActive = status.anti_sniping_active;
+        
+        const alertElement = document.getElementById('anti-sniping-alert');
+        const timeRemainingElement = document.getElementById('time-remaining-display');
+        const btnPlus1 = document.getElementById('btn-plus-1');
+        const btnPlus500k = document.getElementById('btn-plus-500k');
+        
+        // Limpiar intervalo anterior si existe
+        if (timeUpdateInterval) {
+            clearInterval(timeUpdateInterval);
+            timeUpdateInterval = null;
+        }
+        
+        if (antiSnipingActive && status.time_remaining > 0) {
+            // Mostrar alerta de anti-sniping
+            alertElement.style.display = 'block';
+            
+            // Deshabilitar botones de puja rápida excepto 1M
+            btnPlus1.disabled = true;
+            btnPlus500k.disabled = true;
+            
+            // Inicializar el tiempo restante
+            let remainingSeconds = Math.max(0, Math.floor(status.time_remaining));
+            
+            // Función para actualizar el tiempo en tiempo real
+            const updateTimeDisplay = () => {
+                if (timeRemainingElement && remainingSeconds >= 0) {
+                    timeRemainingElement.innerHTML = `${remainingSeconds} segundos`;
+                    remainingSeconds--;
+                    
+                    // Detener el intervalo cuando llegue a cero
+                    if (remainingSeconds < 0) {
+                        clearInterval(timeUpdateInterval);
+                        timeUpdateInterval = null;
+                    }
+                }
+            };
+            
+            // Actualizar inmediatamente
+            updateTimeDisplay();
+            
+            // Configurar intervalo para actualizar cada segundo
+            timeUpdateInterval = setInterval(updateTimeDisplay, 1000);
+            
+        } else {
+            // Ocultar alerta de anti-sniping
+            alertElement.style.display = 'none';
+            
+            // Habilitar todos los botones de puja rápida
+            btnPlus1.disabled = false;
+            btnPlus500k.disabled = false;
+            
+            // Limpiar contador de tiempo
+            if (timeRemainingElement) {
+                timeRemainingElement.innerHTML = '';
+            }
+        }
+        
+        // Actualizar la hora de finalización si cambió
+        if (status.end_time) {
+            const endTimeElement = document.getElementById('end_time');
+            if (endTimeElement) {
+                endTimeElement.textContent = formatLocalDateTime(status.end_time);
+            }
+        }
+        
+        // Actualizar el preview por si hay cambios en las validaciones
+        updateBidPreview();
+    }
+    
+    function updateBids() {
+        if (isFinished) {
+            console.log('Subasta finalizada, no se actualizan pujas');
+            return;
+        }
+        
+        fetch(`/api/product/${productId}/bids/`)
+            .then(response => response.json())
+            .then(data => {
+                currentPrice = parseInt(data.current_price);
+                updateCurrentPriceDisplay();
+                updateQuickBidButtons();
+                
+                // Actualizar lista de pujas
+                const bidsList = document.getElementById('bids-list');
+                bidsList.innerHTML = '';
+                
+                if (data.bids && data.bids.length > 0) {
+                    data.bids.forEach((bid, index) => {
+                        const li = document.createElement('li');
+                        li.className = 'list-group-item';
+                        if (bid.user === username) {
+                            li.classList.add('list-group-item-success');
+                        }
+                        
+                        let html = '';
+                        if (bid.user === username) {
+                            html = `<strong>⭐ ${bid.user} (Tú)</strong>: $${formatNumber(bid.amount)}`;
+                        } else {
+                            html = `<strong>${bid.user}</strong>: $${formatNumber(bid.amount)}`;
+                        }
+                        
+                        html += ` <span class="text-muted float-end">${bid.time}</span>`;
+                        li.innerHTML = html;
+                        bidsList.appendChild(li);
+                    });
+                } else {
+                    bidsList.innerHTML = '<li class="list-group-item text-muted">No hay pujas aún</li>';
+                }
+            })
+            .catch(error => {
+                console.error('Error fetching bids:', error);
+            });
+    }
+    
+    // Función para obtener el estado del producto
+    function updateProductStatus() {
+        if (isFinished) {
+            console.log('Subasta finalizada, no se actualiza estado');
+            return;
+        }
+        
+        fetch(`/api/product/${productId}/status/`)
+            .then(response => response.json())
+            .then(data => {
+                updateAntiSnipingStatus(data);
+            })
+            .catch(error => {
+                console.error('Error fetching product status:', error);
+            });
+    }
+    
+    function updateChat() {
+        fetch(`/api/product/${productId}/chat/`)
+            .then(response => response.json())
+            .then(data => {
+                const chatMessages = document.getElementById('chat-messages');
+                chatMessages.innerHTML = '';
+                
+                if (data.messages && data.messages.length > 0) {
+                    data.messages.forEach(msg => {
+                        const messageDiv = document.createElement('div');
+                        messageDiv.className = 'mb-2';
+                        
+                        if (msg.user === username) {
+                            messageDiv.innerHTML = `
+                                <div class="d-flex justify-content-end">
+                                    <div class="bg-primary text-white p-2 rounded" style="max-width: 70%;">
+                                        <small class="d-block">Tú</small>
+                                        ${msg.message}
+                                        <small class="d-block text-end">${msg.time}</small>
+                                    </div>
+                                </div>
+                            `;
+                        } else {
+                            messageDiv.innerHTML = `
+                                <div class="d-flex justify-content-start">
+                                    <div class="bg-light p-2 rounded" style="max-width: 70%;">
+                                        <small class="d-block text-muted">${msg.user}</small>
+                                        ${msg.message}
+                                        <small class="d-block text-end text-muted">${msg.time}</small>
+                                    </div>
+                                </div>
+                            `;
+                        }
+                        
+                        chatMessages.appendChild(messageDiv);
+                    });
+                    
+                    // Auto-scroll to bottom
+                    chatMessages.scrollTop = chatMessages.scrollHeight;
+                }
+            })
+            .catch(error => {
+                console.error('Error fetching chat:', error);
+            });
+    }
+    
+    function sendMessage() {
+        if (isFinished) {
+            alert('La subasta ha finalizado. No se pueden enviar mensajes.');
+            return;
+        }
+        
+        const messageInput = document.getElementById('chat-input');
+        const message = messageInput.value.trim();
+        
+        if (!message) return;
+        
+        if (!username) {
+            alert('Debes ingresar un nombre para chatear');
+            return;
+        }
+        
+        fetch(`/api/product/${productId}/chat/send/`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRFToken': getCookie('csrftoken'),
+            },
+            body: JSON.stringify({
+                message: message
+            })
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                messageInput.value = '';
+                updateChat(); // Actualizar chat inmediatamente
+            } else {
+                alert('Error: ' + data.error);
+            }
+        })
+        .catch(error => {
+            console.error('Error sending message:', error);
+        });
+    }
+
+    // Función para validar puja manual
+    function validateManualBid(amount) {
+        const increment = amount - currentPrice;
+        if (antiSnipingActive && increment < 1000000) {
+            alert(`Modo anti-sniping activado. El incremento debe ser de al menos $1,000,000 (incrementaste $${formatNumber(increment)})`);
+            return false;
+        }
+        return true;
+    }
+    
+    function submitBid() {
+        if (isFinished) {
+            alert('La subasta ha finalizado. No se pueden realizar más pujas.');
+            return;
+        }
+
+        // Verificar si está en tiempo de espera
+        if (bidCooldown) {
+            alert('Espera un momento antes de hacer otra puja.');
+            return;
+        }
+        
+        const amountInput = document.getElementById('bid-amount');
+        const amount = parseFormattedNumber(amountInput.value);
+        
+        if (isNaN(amount) || amount <= 0) {
+            alert('Por favor ingresa un monto válido');
+            return;
+        }
+        
+        if (amount > MAX_BID) {
+            alert(`La puja no puede exceder los $${formatNumber(MAX_BID)}`);
+            return;
+        }
+        
+        if (amount <= currentPrice) {
+            alert(`La puja debe ser mayor al precio actual ($${formatNumber(currentPrice)})`);
+            return;
+        }
+        
+        // Validación adicional para modo anti-sniping (frontend) - INCREMENTO
+        const increment = amount - currentPrice;
+        if (antiSnipingActive && increment < 1000000) {
+            alert(`Modo anti-sniping activado. El incremento debe ser de al menos $1,000,000 (incrementaste $${formatNumber(increment)})`);
+            return;
+        }
+
+        // Deshabilitar temporalmente los botones de puja
+        setBidButtonsState(false);
+        
+        fetch(`/api/product/${productId}/bid/`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRFToken': getCookie('csrftoken'),
+            },
+            body: JSON.stringify({
+                amount: amount
+            })
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                amountInput.value = '';
+                document.getElementById('bid-preview').innerHTML = '';
+
+                // Activar tiempo de espera de 2 segundos
+                startCooldown(2000);
+                
+                // Actualizar inmediatamente después de una puja exitosa
+                updateBids();
+                
+                // Si la subasta fue extendida, actualizar el estado inmediatamente
+                if (data.extended) {
+                    // Pequeña pausa para asegurar que el backend haya guardado los cambios
+                    setTimeout(() => {
+                        updateProductStatus();
+                    }, 300);
+                }
+            } else {
+                alert('Error: ' + data.error);
+                // Rehabilitar botones si hay error
+                setBidButtonsState(true);
+            }
+        })
+        .catch(error => {
+            console.error('Error submitting bid:', error);
+            alert('Error al enviar la puja');
+            // Rehabilitar botones si hay error
+            setBidButtonsState(true);
+        });
+    }
+
+    // Función para iniciar el tiempo de espera
+    function startCooldown(duration) {
+        bidCooldown = true;
+        
+        // Mostrar indicador visual de espera
+        const bidButtons = document.querySelectorAll('.bid-buttons button, .btn-primary');
+        bidButtons.forEach(btn => {
+            btn.disabled = true;
+            const originalText = btn.innerHTML;
+            btn.setAttribute('data-original-text', originalText);
+            btn.innerHTML = '⏳ Espera...';
+        });
+
+        // Mostrar temporizador visual
+        const cooldownElement = document.getElementById('cooldown-timer');
+        const cooldownSecondsElement = document.getElementById('cooldown-seconds');
+        cooldownElement.style.display = 'block';
+        
+        let remaining = duration / 1000;
+        cooldownSecondsElement.textContent = remaining.toFixed(1);
+        
+        const countdownInterval = setInterval(() => {
+            remaining -= 0.1;
+            if (remaining <= 0) {
+                clearInterval(countdownInterval);
+                cooldownElement.style.display = 'none';
+                bidCooldown = false;
+                setBidButtonsState(true);
+            } else {
+                cooldownSecondsElement.textContent = remaining.toFixed(1);
+            }
+        }, 100);
+        
+        // Configurar temporizador para restaurar botones
+        if (cooldownTimer) {
+            clearTimeout(cooldownTimer);
+        }
+        
+        cooldownTimer = setTimeout(() => {
+            clearInterval(countdownInterval);
+            cooldownElement.style.display = 'none';
+            bidCooldown = false;
+            setBidButtonsState(true);
+        }, duration);
+    }
+
+    // Función para establecer el estado de los botones de puja
+    function setBidButtonsState(enabled) {
+        const bidButtons = document.querySelectorAll('.bid-buttons button, .btn-primary');
+        bidButtons.forEach(btn => {
+            if (enabled) {
+                btn.disabled = false;
+                const originalText = btn.getAttribute('data-original-text');
+                if (originalText) {
+                    btn.innerHTML = originalText;
+                }
+            } else {
+                btn.disabled = true;
+            }
+        });
+        
+        // Aplicar reglas adicionales del modo anti-sniping
+        if (enabled && antiSnipingActive) {
+            document.getElementById('btn-plus-1').disabled = true;
+            document.getElementById('btn-plus-500k').disabled = true;
+        }
+    }
+
+    function quickChangeUsername() {
+    const newUsername = prompt('Ingresa el nombre DE TU EQUIPO DE LIGA MASTER:', '{{ username }}');
+    
+    if (newUsername && newUsername.trim() && newUsername !== '{{ username }}') {
+        fetch(`/api/product/${productId}/change-username/`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRFToken': getCookie('csrftoken'),
+            },
+            body: JSON.stringify({
+                new_username: newUsername.trim()
+            })
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                alert('Nombre cambiado exitosamente');
+                location.reload();
+            } else {
+                alert('Error: ' + data.error);
+            }
+        })
+        .catch(error => {
+            console.error('Error changing username:', error);
+            // Fallback: redirigir a la página de cambio de nombre
+            window.location.href = `{% url 'change_username' product.id %}`;
+        });
+    }
+    }
+    
+    // Función para obtener el token CSRF
+    function getCookie(name) {
+        let cookieValue = null;
+        if (document.cookie && document.cookie !== '') {
+            const cookies = document.cookie.split(';');
+            for (let i = 0; i < cookies.length; i++) {
+                const cookie = cookies[i].trim();
+                if (cookie.substring(0, name.length + 1) === (name + '=')) {
+                    cookieValue = decodeURIComponent(cookie.substring(name.length + 1));
+                    break;
+                }
+            }
+        }
+        return cookieValue;
+    }
+
+    function formatLocalDateTime(isoString) {
+        const date = new Date(isoString);
+        if (isNaN(date)) {
+            return "Fecha inválida";
+        }
+        const options = { 
+            year: 'numeric', month: 'long', day: 'numeric',
+            hour: '2-digit', minute: '2-digit', second: '2-digit'
+        };
+        return date.toLocaleString(undefined, options);
+        }
+
+        document.addEventListener('DOMContentLoaded', function() {
+        const startElem = document.getElementById('start_time');
+        const endElem = document.getElementById('end_time');
+
+        if (startElem) {
+            const startUTC = startElem.textContent;
+            startElem.textContent = formatLocalDateTime(startUTC);
+        }
+
+        if (endElem) {
+            const endUTC = endElem.textContent;
+            endElem.textContent = formatLocalDateTime(endUTC);
+        }
+    });
+    
+    // Iniciar el polling cuando el documento esté listo
+    document.addEventListener('DOMContentLoaded', function() {
+        if (!isFinished) {
+            updateBids(); // Actualizar inmediatamente
+            updateInterval = setInterval(updateBids, 2000); // Actualizar pujas cada 2 segundos
+            
+            updateProductStatus(); // Actualizar estado inmediatamente
+            statusInterval = setInterval(updateProductStatus, 1000); // Actualizar estado cada segundo
+        }
+        
+        updateChat(); // Actualizar chat inmediatamente
+        chatInterval = setInterval(updateChat, 3000);   // Actualizar chat cada 3 segundos
+        
+        // Permitir enviar con Enter
+        document.getElementById('bid-amount').addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') {
+                submitBid();
+            }
+        });
+        
+        document.getElementById('chat-input').addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') {
+                sendMessage();
+            }
+        });
+        
+        // Formatear automáticamente el input de puja
+        document.getElementById('bid-amount').addEventListener('input', formatBidInput);
+        window.addEventListener('beforeunload', function() {
+            if (timeUpdateInterval) {
+                clearInterval(timeUpdateInterval);
+            }
+            if (updateInterval) {
+                clearInterval(updateInterval);
+            }
+            if (statusInterval) {
+                clearInterval(statusInterval);
+            }
+            if (chatInterval) {
+                clearInterval(chatInterval);
+            }
+            if (cooldownTimer) {
+                clearTimeout(cooldownTimer);
+            }
+        });
+    });
+</script>
+{% endblock %}

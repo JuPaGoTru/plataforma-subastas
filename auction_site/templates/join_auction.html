@@ -1,0 +1,59 @@
+{% extends 'base.html' %}
+
+{% block content %}
+<div class="row justify-content-center">
+    <div class="col-md-6">
+        <div class="card">
+            <div class="card-header text-center">
+                <h2>{% if request.session.username %}Cambiar{% else %}Unirse a{% endif %} la subasta</h2>
+                <h4>{{ product.name }}</h4>
+            </div>
+            <div class="card-body">
+                <div class="text-center mb-4">
+                    <img src="{{ product.image.url }}" class="img-fluid rounded" alt="{{ product.name }}" style="max-height: 200px;">
+                </div>
+                
+                {% if error %}
+                <div class="alert alert-danger">{{ error }}</div>
+                {% endif %}
+                
+                {% if request.session.username %}
+                <div class="alert alert-info">
+                    <p>Nombre actual: <strong>{{ request.session.username }}</strong></p>
+                </div>
+                {% endif %}
+                
+                <form method="post">
+                    {% csrf_token %}
+                    {% if request.session.username %}
+                    <input type="hidden" name="change_user" value="true">
+                    {% endif %}
+                    
+                    <div class="mb-3">
+                        <label for="username" class="form-label">Nombre de usuario:</label>
+                        <input type="text" class="form-control form-control-lg" id="username" name="username" required autofocus
+                               value="{{ request.session.username|default:'' }}">
+                        <div class="form-text">Este nombre se mostrará cuando realices pujas y mensajes.</div>
+                    </div>
+                    
+                    <button type="submit" class="btn btn-primary btn-lg w-100">
+                        {% if request.session.username %}Cambiar nombre DE TU EQUIPO DE LIGA MASTER{% else %}Unirse a la subasta{% endif %}
+                    </button>
+                    
+                    {% if request.session.username %}
+                    <a href="{% url 'product_detail' product.id %}" class="btn btn-outline-secondary w-100 mt-2">
+                        Cancelar y volver
+                    </a>
+                    {% endif %}
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+document.getElementById('username').addEventListener('input', function() {
+    this.value = this.value.replace(/[^a-zA-Z0-9áéíóúÁÉÍÓÚñÑ_\- ]/g, '');
+});
+</script>
+{% endblock %}
