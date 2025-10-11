@@ -29,7 +29,7 @@ def index(request):
     # Subastas finalizadas
     finished_auctions = Product.objects.filter(
         end_time__lt=now
-    ).order_by('-end_time')[:10]  # Últimas 10 finalizadas
+    ).order_by('-end_time')
     
     return render(request, 'index.html', {
         'ongoing_auctions': ongoing_auctions,
@@ -230,8 +230,8 @@ class SubmitBidView(View):
             data = json.loads(request.body)
             amount = int(data.get('amount', 0))
             
-            # Verificar tope máximo de 510 millones
-            MAX_BID = 510000000
+            # Verificar tope máximo de 422 millones
+            MAX_BID = 422000000
             if amount > MAX_BID:
                 return JsonResponse({
                     'success': False, 
