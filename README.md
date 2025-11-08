@@ -1,7 +1,7 @@
 # 🎯 Subastas en Tiempo Real
 
 Este proyecto es una aplicación desarrollada en **Django** que permite gestionar **subastas en línea** con actualizaciones en tiempo real.  
-Los usuarios pueden ofertar por ítems (cartas de eFootball en este caso), y el sistema maneja la lógica de pujas, control de tiempo y actualización dinámica.
+Los usuarios pueden ofertar por distintos ítems (cartas de eFootball en este caso), y el sistema maneja la lógica de pujas, control de tiempo y actualización dinámica.
 
 ---
 
