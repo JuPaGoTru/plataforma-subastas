@@ -1,10 +1,11 @@
+import json, html
 from django.shortcuts import render, get_object_or_404, redirect
+from django.db import transaction, IntegrityError, DatabaseError
 from django.http import JsonResponse, HttpResponseRedirect
-from django.views.decorators.csrf import csrf_exempt
+from django.views.decorators.csrf import csrf_exempt, ensure_csrf_cookie
 from django.utils.decorators import method_decorator
 from django.views import View
 from django.views.decorators.http import require_http_methods
-import json
 from django.views.decorators.http import require_POST
 from .models import Product, Bid, GuestUser, ChatMessage
 from django.utils import timezone
@@ -18,7 +19,7 @@ def index(request):
         start_time__lte=now, 
         end_time__gte=now,
         is_active=True
-    )
+    ).order_by('end_time')
     
     # Subastas programadas (futuras)
     upcoming_auctions = Product.objects.filter(
@@ -38,6 +39,7 @@ def index(request):
         'now': now
     })
 
+@ensure_csrf_cookie
 def product_detail(request, product_id):
     product = get_object_or_404(Product, id=product_id)
     
@@ -105,12 +107,15 @@ def join_auction(request, product_id):
                     'error': 'Este nombre de usuario ya está en uso. Por favor elige otro.'
                 })
             
+            guest_user = None
+            
             # Si el usuario actual existe y queremos cambiarlo, actualizarlo
             if change_user and current_username:
                 try:
                     old_user = GuestUser.objects.get(username=current_username)
                     old_user.username = username
                     old_user.save()
+                    guest_user = old_user
                 except GuestUser.DoesNotExist:
                     # Crear nuevo usuario si el antiguo no existe
                     guest_user = GuestUser.objects.create(
@@ -131,14 +136,29 @@ def join_auction(request, product_id):
             
             # Guardar username en sesión
             request.session['username'] = username
-            request.session['guest_user_id'] = guest_user.id if 'guest_user' in locals() else None
+            request.session['guest_user_id'] = guest_user.id if guest_user else None
             
             return redirect('product_detail', product_id=product_id)
-            
-        except Exception as e:
+        
+        except IntegrityError:
+            # Error de integridad (nombre duplicado por race condition)
             return render(request, 'join_auction.html', {
                 'product': product,
-                'error': f'Error: {str(e)}'
+                'error': 'Este nombre ya está en uso. Intenta con otro.'
+            })
+        
+        except DatabaseError as e:
+            # Error general de base de datos
+            return render(request, 'join_auction.html', {
+                'product': product,
+                'error': 'Error de base de datos. Por favor, intenta más tarde.'
+            })
+        
+        except ValueError as e:
+            # Error de validación de datos
+            return render(request, 'join_auction.html', {
+                'product': product,
+                'error': 'Datos inválidos. Por favor, verifica tu información.'
             })
     
     return render(request, 'join_auction.html', {'product': product})
@@ -146,6 +166,12 @@ def join_auction(request, product_id):
 def change_username(request, product_id):
     """Vista para cambiar el nombre de usuario"""
     product = get_object_or_404(Product, id=product_id)
+    
+    current_username = request.session.get('username', '')
+    
+    # Si no hay usuario en sesión, redirigir a join
+    if not current_username:
+        return redirect('join_auction', product_id=product_id)
     
     if request.method == 'POST':
         new_username = request.POST.get('new_username', '').strip()
@@ -155,14 +181,13 @@ def change_username(request, product_id):
                 'product': product,
                 'error': 'Por favor ingresa un nuevo nombre de usuario'
             })
-        
-        current_username = request.session.get('username', '')
-        
-        if not current_username:
-            return redirect('join_auction', product_id=product_id)
+         
+        # Si el nombre es el mismo, no hacer nada
+        if new_username == current_username:
+            return redirect('product_detail', product_id=product_id)
         
         # Verificar si el nuevo nombre ya existe
-        if new_username != current_username and GuestUser.objects.filter(username=new_username).exists():
+        if GuestUser.objects.filter(username=new_username).exists():
             return render(request, 'change_username.html', {
                 'product': product,
                 'error': 'Este nombre de usuario ya está en uso. Por favor elige otro.'
@@ -178,135 +203,151 @@ def change_username(request, product_id):
             request.session['username'] = new_username
             
             return redirect('product_detail', product_id=product_id)
-            
+        
         except GuestUser.DoesNotExist:
-            # Si el usuario no existe, crear uno nuevo
-            guest_user = GuestUser.objects.create(
-                username=new_username,
-                session_key=request.session.session_key
-            )
-            request.session['username'] = new_username
-            request.session['guest_user_id'] = guest_user.id
-            
-            return redirect('product_detail', product_id=product_id)
+            # Si el usuario no existe, redirigir a join en lugar de crear uno nuevo
+            # (Es más seguro porque indica que la sesión está corrupta)
+            if 'username' in request.session:
+                del request.session['username']
+            return redirect('join_auction', product_id=product_id)
+        
+        except IntegrityError:
+            # Error de integridad (nombre duplicado por race condition)
+            return render(request, 'change_username.html', {
+                'product': product,
+                'current_username': current_username,
+                'error': 'Este nombre ya está en uso. Intenta con otro.'
+            })
+        
+        except DatabaseError:
+            # Error general de base de datos
+            return render(request, 'change_username.html', {
+                'product': product,
+                'current_username': current_username,
+                'error': 'Error de base de datos. Por favor, intenta más tarde.'
+            })
     
-    return render(request, 'change_username.html', {'product': product})
+    return render(request, 'change_username.html', {
+        'product': product,
+        'current_username': current_username
+    })
 
-@csrf_exempt
+
 @require_http_methods(["GET"])
 def get_bids_data(request, product_id):
-    product = get_object_or_404(Product, id=product_id)
-    bids = Bid.objects.filter(product=product).select_related('guest_user').order_by('-created_at')[:10]
+     # Optimizado: traer solo los campos necesarios del producto
+    product = Product.objects.only('id', 'current_price').get(id=product_id)
     
-    bids_data = [
-        {
-            'user': bid.guest_user.username if bid.guest_user else "Anónimo",
-            'amount': bid.amount,  # Ya es entero
-            'amount_formatted': bid.amount_formatted,  # ← Añade esto
-            'time': bid.created_at.strftime('%H:%M:%S')
-        }
-        for bid in bids
-    ]
+    # Traer las últimas 5 pujas con el usuario relacionado
+    bids = Bid.objects.filter(
+        product_id=product_id
+    ).select_related(
+        'guest_user'
+    ).order_by('-created_at')[:10]
+
+    bids_data = [{
+        'user': bid.guest_user.username,
+        'amount': bid.amount,
+        'amount_formatted': bid.amount_formatted,
+        'time': bid.created_at.strftime('%H:%M:%S')
+    } for bid in bids]
     
     return JsonResponse({
         'bids': bids_data,
-        'current_price': product.current_price,  # Ya es entero
-        'current_price_formatted': product.current_price_formatted  # ← Y esto
+        'current_price': product.current_price,
+        'current_price_formatted': product.current_price_formatted
     })
 
-@method_decorator(csrf_exempt, name='dispatch')
 class SubmitBidView(View):
     def post(self, request, product_id):
         try:
-            product = get_object_or_404(Product, id=product_id)
-            
-            # Verificar si la subasta está en curso
-            if not product.is_ongoing:
-                if product.is_upcoming:
-                    return JsonResponse({'success': False, 'error': 'La subasta aún no ha comenzado'})
-                else:
-                    return JsonResponse({'success': False, 'error': 'La subasta ha finalizado'})
-            
             data = json.loads(request.body)
-            amount = int(data.get('amount', 0))
-            
-            # Verificar tope máximo de 422 millones
-            MAX_BID = 422000000
-            if amount > MAX_BID:
-                return JsonResponse({
-                    'success': False, 
-                    'error': f'La puja no puede exceder los ${MAX_BID:,}'
-                })
-            
-            # Verificar sesión de guest
-            if 'username' not in request.session:
-                return JsonResponse({'success': False, 'error': 'Usuario no identificado'})
-            
-            username = request.session['username']
-            guest_user = get_object_or_404(GuestUser, username=username)
+            amount = data.get('amount')
 
-            # Verificar tiempo entre pujas (mínimo 2 segundos)
-            if guest_user.last_bid_time:
-                time_since_last_bid = (timezone.now() - guest_user.last_bid_time).total_seconds()
-                if time_since_last_bid < 2:  # 2 segundos mínimo entre pujas
-                    time_to_wait = round(2 - time_since_last_bid, 1)
+            if not amount:
+                return JsonResponse({'success': False, 'error': 'Monto de puja no proporcionado.'})
+
+            try:
+                amount = int(amount)
+            except ValueError:
+                return JsonResponse({'success': False, 'error': 'Monto inválido.'})
+
+            # Usar transacción atómica con select_for_update
+            with transaction.atomic():
+                # Bloquear el producto para evitar race conditions
+                product = Product.objects.select_for_update().get(id=product_id)
+                
+                # Validar que la subasta esté activa
+                if not product.is_ongoing:
                     return JsonResponse({
-                        'success': False, 
-                        'error': f'Espera {time_to_wait} segundos antes de hacer otra puja'
+                        'success': False,
+                        'error': 'La subasta no está activa.'
                     })
-            
-            if amount <= product.current_price:
+
+                # Validar que la puja sea mayor al precio actual
+                if amount <= product.current_price:
+                    return JsonResponse({
+                        'success': False,
+                        'error': f'La puja debe ser mayor a {product.current_price:,}.'
+                    })
+
+                # Validar límite máximo
+                if amount > 512000000:
+                    return JsonResponse({
+                        'success': False,
+                        'error': 'El monto excede el límite permitido.'
+                    })
+
+                # Obtener o validar el usuario
+                username = request.session.get('username')
+                if not username:
+                    return JsonResponse({
+                        'success': False,
+                        'error': 'Debes unirte a la subasta primero.'
+                    })
+
+                guest_user = GuestUser.objects.filter(username=username).first()
+                if not guest_user:
+                    return JsonResponse({
+                        'success': False,
+                        'error': 'Usuario no encontrado.'
+                    })
+
+                # Guardar precio anterior ANTES de extender
+                previous_price = product.current_price
+                
+                # Extender subasta si es necesario
+                extended = product.extend_auction_if_needed(amount, previous_price)
+
+                # Crear la nueva puja
+                new_bid = Bid.objects.create(
+                    product=product,
+                    guest_user=guest_user,
+                    amount=amount
+                )
+
+                # Actualizar el precio actual del producto
+                product.current_price = amount
+                product.save()
+
                 return JsonResponse({
-                    'success': False, 
-                    'error': f'La puja debe ser mayor al precio actual (${product.current_price:,})'
+                    'success': True,
+                    'new_price': amount,
+                    'message': 'Puja realizada con éxito'
                 })
-            
-            # VERIFICACIÓN CORREGIDA: Validar incremento mínimo en modo anti-sniping
-            increment = amount - product.current_price
-            if product.is_in_anti_sniping_period and increment < 1000000:
-                return JsonResponse({
-                    'success': False, 
-                    'error': f'Modo anti-sniping activado. El incremento debe ser de al menos $1,000,000 (incrementaste ${increment:,})'
-            })
-            
-            # Guardar el precio actual antes de actualizarlo
-            previous_price = product.current_price
-            
-            # Create new bid
-            bid = Bid.objects.create(
-                product=product,
-                guest_user=guest_user,
-                amount=amount
-            )
-            
-            # Update product current price
-            product.current_price = amount
-            
-            # Verificar y aplicar anti-sniping si es necesario (usando el precio anterior)
-            extended = product.extend_auction_if_needed(amount, previous_price)
-            
-            # Guardar cambios en el producto
-            product.save()
-            
-            # Actualizar el timestamp de la última puja del usuario
-            guest_user.last_bid_time = timezone.now()
-            guest_user.save()
 
-
+        except Product.DoesNotExist:
             return JsonResponse({
-                'success': True, 
-                'message': f'Puja de ${amount:,} realizada con éxito',
-                'extended': extended,
-                'new_end_time': product.end_time.isoformat() if extended else None
+                'success': False,
+                'error': 'Producto no encontrado.'
             })
-            
-        except ValueError:
-            return JsonResponse({'success': False, 'error': 'Por favor ingresa un número entero válido'})
         except Exception as e:
-            return JsonResponse({'success': False, 'error': str(e)})
+            return JsonResponse({
+                'success': False,
+                'error': f'Error al procesar la puja: {str(e)}'
+            })
         
 # Añadir una nueva vista para obtener el estado del producto
-@csrf_exempt
 @require_http_methods(["GET"])
 def get_product_status(request, product_id):
     """Obtener el estado actual del producto para el frontend"""
@@ -314,7 +355,7 @@ def get_product_status(request, product_id):
         product = get_object_or_404(Product, id=product_id)
         
         return JsonResponse({
-            'anti_sniping_active': product.anti_sniping_active,
+            'anti_sniping_active': product.should_show_anti_sniping,
             'time_remaining': product.time_remaining,
             'current_price': product.current_price,
             'is_ongoing': product.is_ongoing,
@@ -324,7 +365,6 @@ def get_product_status(request, product_id):
         return JsonResponse({'error': 'Producto no encontrado'}, status=404)
 
 
-@csrf_exempt
 @require_http_methods(["GET"])
 def get_chat_messages(request, product_id):
     """Obtener los últimos mensajes del chat"""
@@ -346,25 +386,38 @@ def get_chat_messages(request, product_id):
         'messages': messages_data
     })
 
-@csrf_exempt
 @require_http_methods(["POST"])
 def send_chat_message(request, product_id):
     """Enviar un nuevo mensaje al chat"""
     try:
         data = json.loads(request.body)
-        message_text = data.get('message', '').strip()
-        
-        if not message_text:
-            return JsonResponse({'success': False, 'error': 'Mensaje vacío'})
-        
-        # Verificar sesión de guest
-        if 'username' not in request.session:
-            return JsonResponse({'success': False, 'error': 'Usuario no identificado'})
-        
-        username = request.session['username']
-        
-        product = get_object_or_404(Product, id=product_id)
-        guest_user = get_object_or_404(GuestUser, username=username)
+    except json.JSONDecodeError:
+        return JsonResponse({
+            'success': False, 
+            'error': 'Formato de datos inválido.'
+        })
+    
+    message_text = data.get('message', '').strip()
+    
+    if not message_text:
+        return JsonResponse({'success': False, 'error': 'Mensaje vacío'})
+    
+    # Sanitizar mensaje contra XSS y limitar a 500 caracteres
+    message_text = html.escape(message_text)[:500]
+    
+    # Verificar sesión de guest
+    if 'username' not in request.session:
+        return JsonResponse({
+            'success': False, 
+            'error': 'Usuario no identificado. Por favor, únete a la subasta primero.'
+        })
+    
+    username = request.session['username']
+    
+    try:
+        # Obtener producto y usuario
+        product = Product.objects.get(id=product_id)
+        guest_user = GuestUser.objects.get(username=username)
         
         # Crear nuevo mensaje
         chat_message = ChatMessage.objects.create(
@@ -374,9 +427,27 @@ def send_chat_message(request, product_id):
         )
         
         return JsonResponse({'success': True, 'message': 'Mensaje enviado'})
-        
-    except Exception as e:
-        return JsonResponse({'success': False, 'error': str(e)})
+    
+    except Product.DoesNotExist:
+        return JsonResponse({
+            'success': False,
+            'error': 'La subasta no existe.'
+        })
+    
+    except GuestUser.DoesNotExist:
+        # Limpiar sesión corrupta
+        if 'username' in request.session:
+            del request.session['username']
+        return JsonResponse({
+            'success': False,
+            'error': 'Tu sesión ha expirado. Recarga la página y vuelve a unirte.'
+        })
+    
+    except DatabaseError:
+        return JsonResponse({
+            'success': False,
+            'error': 'Error al enviar el mensaje. Intenta de nuevo.'
+        })
     
 @require_POST
 def logout_guest(request, product_id):
