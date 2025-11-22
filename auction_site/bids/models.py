@@ -9,11 +9,18 @@ class Product(models.Model):
     image = models.ImageField(upload_to='products/')
     starting_price = models.IntegerField(default=0)
     current_price = models.IntegerField(default=0)
-    start_time = models.DateTimeField(default=timezone.now)
+    start_time = models.DateTimeField(default=timezone.now, db_index=True)
     end_time = models.DateTimeField()
     is_active = models.BooleanField(default=True)
     created_at = models.DateTimeField(auto_now_add=True)
     anti_sniping_active = models.BooleanField(default=False)
+
+    class Meta:
+        # ✅ AGREGAR índices compuestos para queries complejas
+        indexes = [
+            models.Index(fields=['start_time', 'end_time', 'is_active'], name='active_auctions_idx'),
+            models.Index(fields=['-end_time'], name='finished_auctions_idx'),
+        ]
     
     @property
     def is_upcoming(self):
@@ -54,6 +61,18 @@ class Product(models.Model):
         return self.is_ongoing and self.time_remaining <= 30
     
     @property
+    def should_show_anti_sniping(self):
+        """
+        Determina si debe mostrarse la alerta de anti-sniping.
+        Se muestra si:
+        1. Quedan <= 30 segundos, O
+        2. El modo anti-sniping fue activado por una puja (y aún está en curso)
+        """
+        if not self.is_ongoing:
+            return False
+        return self.is_in_anti_sniping_period or self.anti_sniping_active
+    
+    @property
     def winning_bid(self):
         """Obtiene la puja ganadora"""
         if self.is_finished:
@@ -85,13 +104,12 @@ class Product(models.Model):
         """
         Extiende la subasta si es necesario (anti-sniping)
         Solo extiende si el incremento de la puja es de al menos 1,000,000
+        NO hace save() - esto lo maneja la vista dentro de la transacción
         """
         increment = bid_amount - previous_price
         if self.is_in_anti_sniping_period and increment >= 1000000:
-            # Extender la subasta 30 segundos más
             self.end_time += datetime.timedelta(seconds=30)
             self.anti_sniping_active = True
-            self.save()
             return True
         return False
     
@@ -139,7 +157,7 @@ class Bid(models.Model):
     user = models.ForeignKey(User, on_delete=models.CASCADE, null=True, blank=True)
     guest_user = models.ForeignKey(GuestUser, on_delete=models.CASCADE, null=True, blank=True)
     amount = models.IntegerField()  # Dólares enteros
-    created_at = models.DateTimeField(auto_now_add=True)
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
 
     @property
     def amount_formatted(self):
@@ -147,7 +165,11 @@ class Bid(models.Model):
         return f"{self.amount:,}".replace(",", ".")
     
     class Meta:
-        ordering = ['-amount']
+        ordering = ['-created_at']
+        # ✅ Índice compuesto para queries de pujas por producto
+        indexes = [
+            models.Index(fields=['product', '-created_at'], name='product_bids_idx'),
+        ]
     
     def __str__(self):
         if self.user:
