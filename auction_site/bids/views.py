@@ -1,9 +1,8 @@
 import json, html
 from django.shortcuts import render, get_object_or_404, redirect
 from django.db import transaction, IntegrityError, DatabaseError
-from django.http import JsonResponse, HttpResponseRedirect
-from django.views.decorators.csrf import csrf_exempt, ensure_csrf_cookie
-from django.utils.decorators import method_decorator
+from django.http import JsonResponse
+from django.views.decorators.csrf import ensure_csrf_cookie
 from django.views import View
 from django.views.decorators.http import require_http_methods
 from django.views.decorators.http import require_POST
