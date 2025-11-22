@@ -100,7 +100,7 @@
                         </div>
                         <div id="bid-preview" class="mt-1"></div>
                         <div class="form-text">
-                            💡 Máximo permitido: $422.000.000
+                            💡 Máximo permitido: $512.000.000
                         </div>
                     </div>
 
@@ -184,7 +184,7 @@
     
     // Deshabilitar funciones si la subasta está finalizada
     const isFinished = {{ product.is_finished|yesno:"true,false" }};
-    const MAX_BID = 422000000; // 422 millones
+    const MAX_BID = 512000000; // 512 millones
 
     // Función para formatear números con separadores de miles
     function formatNumber(number) {
@@ -754,14 +754,14 @@
     document.addEventListener('DOMContentLoaded', function() {
         if (!isFinished) {
             updateBids(); // Actualizar inmediatamente
-            updateInterval = setInterval(updateBids, 2000); // Actualizar pujas cada 2 segundos
+            updateInterval = setInterval(updateBids, 3000); // Actualizar pujas cada 3 segundos
             
             updateProductStatus(); // Actualizar estado inmediatamente
-            statusInterval = setInterval(updateProductStatus, 1000); // Actualizar estado cada segundo
+            statusInterval = setInterval(updateProductStatus, 2000); // Actualizar estado cada 2 segundos
         }
         
         updateChat(); // Actualizar chat inmediatamente
-        chatInterval = setInterval(updateChat, 3000);   // Actualizar chat cada 3 segundos
+        chatInterval = setInterval(updateChat, 5000);   // Actualizar chat cada 5 segundos
         
         // Permitir enviar con Enter
         document.getElementById('bid-amount').addEventListener('keypress', function(e) {
