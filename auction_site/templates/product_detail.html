@@ -9,6 +9,9 @@
             <div class="card-body">
                 <div class="d-flex justify-content-between align-items-center mb-3">
                     <h2 class="card-title mb-0">{{ product.name }}</h2>
+                    {% if product.is_silent_auction %}
+                    <span class="badge bg-info ms-2">🤫 Silenciosa</span>
+                    {% endif %}
                     {% if username %}
                     <div class="dropdown">
                         <button class="btn btn-outline-secondary btn-sm dropdown-toggle" type="button" data-bs-toggle="dropdown">
@@ -31,29 +34,60 @@
                     {% endif %}
                 </div>
                 
-                <div class="alert alert-info">
-                    <h4 class="mb-0">Precio actual: $<span id="current-price-display">{{ product.current_price }}</span></h4>
-                    <small class="text-muted" id="current-price" style="display: none;">{{ product.current_price }}</small>
-                </div>
-
+                {% if not product.is_finished %}
+                    <div class="alert alert-info">
+                        {% if product.is_silent_auction %}
+                            <!-- Mostrar precio inicial en subastas silenciosas -->
+                            <h4 class="mb-0">Precio inicial: <span id="current-price-display">{{ product.starting_price }}</span></h4>
+                            <small class="text-muted">El precio actual está oculto hasta el final</small>
+                        {% else %}
+                            <!-- Mostrar precio actual en subastas normales -->
+                            <h4 class="mb-0">Precio actual: <span id="current-price-display">{{ product.current_price }}</span></h4>
+                        {% endif %}
+                        <small class="text-muted" id="current-price" style="display: none;">{{ product.current_price }}</small>
+                    </div>
+                {% endif %}
+                
                 <!-- Alerta de anti-sniping (inicialmente oculta) -->
                 <div id="anti-sniping-alert" class="alert alert-warning mt-3" style="display: none;">
                     <h5>⚡ Modo Anti-Sniping Activado</h5>
                     <p class="mb-0">Solo se aceptan pujas de $1,000,000 o más. La subasta se extenderá 30 segundos con cada puja válida.</p>
                 </div>
                 
+                {% if product.is_silent_auction and not product.is_finished and not product.is_upcoming %}
+                <div class="alert alert-info mt-3">
+                    <h5>🤫 Subasta Silenciosa Activa</h5>
+                    <p class="mb-1">• Solo tú verás tu puja</p>
+                    <p class="mb-1">• Puedes modificarla en cualquier momento</p>
+                    <p class="mb-0">• Las pujas mas altas se revelarán al finalizar</p>
+                </div>
+                {% endif %}
+
                 {% if product.is_finished %}
                 <!-- SUBASTA FINALIZADA - MOSTRAR GANADOR -->
                 <div class="alert alert-success mt-3">
-                    <h4>🎉 ¡Subasta finalizada!</h4>
-                    {% if product.winner %}
-                    <p class="mb-1"><strong>Ganador:</strong> {{ product.winner }}</p>
-                    <p class="mb-0"><strong>Precio final:</strong> ${{ product.current_price }}</p>
+                    <h4>🏆 Subasta finalizada</h4>
+                    
+                    {% if product.is_silent_auction %}
+                        <!-- 🆕 NUEVO: Ganador en subasta silenciosa -->
+                        {% with winning_bid=bids.0 %}
+                            {% if winning_bid %}
+                                <p class="mb-1"><strong>Ganador:</strong> {{ winning_bid.guest_user.username }}</p>
+                                <p class="mb-0"><strong>Precio final:</strong> ${{ winning_bid.amount }}</p>
+                            {% else %}
+                                <p>No hubo pujas en esta subasta.</p>
+                            {% endif %}
+                        {% endwith %}
                     {% else %}
-                    <p>No hubo pujas en esta subasta.</p>
+                        <!-- Subasta normal -->
+                        {% if product.winner %}
+                            <p class="mb-1"><strong>Ganador:</strong> {{ product.winner }}</p>
+                            <p class="mb-0"><strong>Precio final:</strong> ${{ product.current_price }}</p>
+                        {% else %}
+                            <p>No hubo pujas en esta subasta.</p>
+                        {% endif %}
                     {% endif %}
                 </div>
-
                 {% elif product.is_upcoming %}
                 <!-- SUBASTA PROGRAMADA -->
                 <div class="alert alert-warning mt-3">
@@ -68,6 +102,8 @@
                 <div class="mt-3">
                     <h5>Realizar puja:</h5>
                     
+                    <!-- 🆕 NUEVO: Ocultar botones de puja rápida en subastas silenciosas -->
+                    {% if not product.is_silent_auction %}
                     <!-- Botones de puja rápida -->
                     <div class="row mb-3">
                         <div class="col-4">
@@ -89,10 +125,22 @@
                             </button>
                         </div>
                     </div>
+                    {% else %}
+                    <!-- Mensaje para subastas silenciosas -->
+                    <div class="alert alert-light mb-3">
+                        <small><em>💡 En subastas silenciosas solo puedes ingresar el monto exacto que deseas pujar</em></small>
+                    </div>
+                    {% endif %}
                     
                     <!-- Input de puja personalizada -->
                     <div class="mb-3">
-                        <label for="bid-amount" class="form-label">O ingresa un monto específico:</label>
+                        <label for="bid-amount" class="form-label">
+                            {% if product.is_silent_auction %}
+                                Ingresa tu puja:
+                            {% else %}
+                                O ingresa un monto específico:
+                            {% endif %}
+                        </label>
                         <div class="input-group">
                             <span class="input-group-text">$</span>
                             <input type="text" id="bid-amount" class="form-control" placeholder="Ej: 1.000.000">
@@ -112,10 +160,6 @@
                         <p class="mb-1">⏳ <strong>Finaliza en:</strong> <span id="end_time">{{ product.end_time|date:"c" }}</span></p>
                     </div>
                 </div>
-                {% else %}
-                <div class="alert alert-info mt-3">
-                    <a href="{% url 'join_auction' product.id %}">Ingresa el nombre DE TU EQUIPO DE LIGA MASTER</a> para poder pujar.
-                </div>
                 {% endif %}
                 {% endif %}
             </div>
@@ -128,21 +172,48 @@
                 <h3>{% if product.is_finished %}Historial de pujas{% else %}Últimas pujas{% endif %}</h3>
             </div>
             <ul id="bids-list" class="list-group list-group-flush">
+                {% if product.is_finished and product.is_silent_auction %}
+                <!-- 🆕 NUEVO: Top 10 con rankings en subastas silenciosas finalizadas -->
+                <li class="list-group-item active">
+                    <strong>🏆 Top 10 Pujas</strong>
+                </li>
+                {% for bid in bids %}
+                <li class="list-group-item {% if forloop.first %}list-group-item-success{% endif %}">
+                    <div class="d-flex justify-content-between align-items-center">
+                        <div>
+                            <span class="badge {% if forloop.first %}bg-success{% else %}bg-secondary{% endif %}">#{{ forloop.counter }}</span>
+                            <strong class="ms-2">{{ bid.guest_user.username }}</strong>
+                            {% if forloop.first %}
+                                <span class="badge bg-warning ms-2">🏆</span>
+                            {% endif %}
+                        </div>
+                        <div class="text-end">
+                            <strong>${{ bid.amount }}</strong>
+                            <br><small class="text-muted">{{ bid.created_at|date:"H:i:s" }}</small>
+                        </div>
+                    </div>
+                </li>
+                {% empty %}
+                <li class="list-group-item text-muted">No hubo pujas en esta subasta</li>
+                {% endfor %}
+            {% else %}
+                <!-- Subasta normal o activa - mostrar formato original -->
                 {% for bid in bids %}
                 <li class="list-group-item {% if bid.guest_user.username == username %}list-group-item-success{% endif %} {% if forloop.first and product.is_finished %}list-group-item-warning{% endif %}">
                     {% if bid.guest_user.username == username %}
-                    <strong>⭐ {{ bid.guest_user.username }} (Tú)</strong>: ${{ bid.amount }} 
+                        <strong>{{ bid.guest_user.username }} (Tú)</strong> ${{ bid.amount }}
                     {% else %}
-                    <strong>{{ bid.guest_user.username }}</strong>: ${{ bid.amount }} 
+                        <strong>{{ bid.guest_user.username }}</strong> ${{ bid.amount }}
                     {% endif %}
                     {% if forloop.first and product.is_finished %}
-                    <span class="badge bg-success float-end">GANADOR</span>
+                        <span class="badge bg-success float-end">GANADOR</span>
                     {% endif %}
-                    <span class="text-muted float-end">{{ bid.created_at|time }}</span>
+                    <span class="text-muted float-end">{{ bid.created_at|date:"H:i:s" }}</span>
                 </li>
                 {% empty %}
                 <li class="list-group-item text-muted">No hay pujas aún</li>
                 {% endfor %}
+            {% endif %}
             </ul>
         </div>
         
@@ -288,9 +359,16 @@
     }
     
     function updateQuickBidButtons() {
-        document.getElementById('plus-1').textContent = formatNumber(currentPrice + 1);
-        document.getElementById('plus-500k').textContent = formatNumber(currentPrice + 500000);
-        document.getElementById('plus-1m').textContent = formatNumber(currentPrice + 1000000);
+        // 🆕 NUEVO: Verificar que los elementos existan (no existen en subastas silenciosas)
+        const btnPlus1 = document.getElementById('plus-1');
+        const btnPlus500k = document.getElementById('plus-500k');
+        const btnPlus1m = document.getElementById('plus-1m');
+        
+        if (btnPlus1 && btnPlus500k && btnPlus1m) {
+            btnPlus1.textContent = formatNumber(currentPrice + 1);
+            btnPlus500k.textContent = formatNumber(currentPrice + 500000);
+            btnPlus1m.textContent = formatNumber(currentPrice + 1000000);
+        }
     }
 
     let timeUpdateInterval;
@@ -298,6 +376,15 @@
     // Función para actualizar el estado anti-sniping
     function updateAntiSnipingStatus(status) {
         antiSnipingActive = status.anti_sniping_active;
+        
+        // 🆕 NUEVO: No procesar nada en subastas silenciosas
+        if (status.is_silent_auction) {
+            const alertElement = document.getElementById('anti-sniping-alert');
+            if (alertElement) {
+                alertElement.style.display = 'none';
+            }
+            return;
+        }
         
         const alertElement = document.getElementById('anti-sniping-alert');
         const timeRemainingElement = document.getElementById('time-remaining-display');
@@ -379,11 +466,73 @@
                 currentPrice = parseInt(data.current_price);
                 updateCurrentPriceDisplay();
                 updateQuickBidButtons();
-                
+
                 // Actualizar lista de pujas
                 const bidsList = document.getElementById('bids-list');
                 bidsList.innerHTML = '';
-                
+
+                // 🆕 NUEVO: Manejo de subastas silenciosas
+                if (data.is_silent) {
+                    if (data.is_ongoing) {
+                        // Subasta silenciosa en curso - mostrar solo puja del usuario
+                        if (data.message) {
+                            const li = document.createElement('li');
+                            li.className = 'list-group-item text-center text-muted';
+                            li.innerHTML = `<em>${data.message}</em>`;
+                            bidsList.appendChild(li);
+                        }
+                        
+                        if (data.bids && data.bids.length > 0) {
+                            data.bids.forEach(bid => {
+                                const li = document.createElement('li');
+                                li.className = 'list-group-item list-group-item-primary';
+                                li.innerHTML = `
+                                    <div class="d-flex justify-content-between align-items-center">
+                                        <div>
+                                            <strong>${bid.user}</strong>
+                                            <br><small class="text-muted">Puedes modificarla</small>
+                                        </div>
+                                        <div class="text-end">
+                                            <strong class="text-primary">${formatNumber(bid.amount)}</strong>
+                                            <br><small class="text-muted">${bid.time}</small>
+                                        </div>
+                                    </div>
+                                `;
+                                bidsList.appendChild(li);
+                            });
+                        }
+                    } else {
+                        // Subasta silenciosa finalizada - mostrar top 10
+                        if (data.message) {
+                            const li = document.createElement('li');
+                            li.className = 'list-group-item active';
+                            li.innerHTML = `<strong>${data.message}</strong>`;
+                            bidsList.appendChild(li);
+                        }
+                        
+                        if (data.bids) {
+                            data.bids.forEach(bid => {
+                                const li = document.createElement('li');
+                                li.className = bid.is_winner ? 'list-group-item list-group-item-success' : 'list-group-item';
+                                li.innerHTML = `
+                                    <div class="d-flex justify-content-between align-items-center">
+                                        <div>
+                                            <span class="badge ${bid.is_winner ? 'bg-success' : 'bg-secondary'}">#${bid.rank}</span>
+                                            <strong class="ms-2">${bid.user}</strong>
+                                            ${bid.is_winner ? '<span class="badge bg-warning ms-2">🏆</span>' : ''}
+                                        </div>
+                                        <div class="text-end">
+                                            <strong>${formatNumber(bid.amount)}</strong>
+                                            <br><small class="text-muted">${bid.time}</small>
+                                        </div>
+                                    </div>
+                                `;
+                                bidsList.appendChild(li);
+                            });
+                        }
+                    }
+                } else {
+                // Subasta normal (tu código original)
                 if (data.bids && data.bids.length > 0) {
                     data.bids.forEach((bid, index) => {
                         const li = document.createElement('li');
@@ -394,22 +543,21 @@
                         
                         let html = '';
                         if (bid.user === username) {
-                            html = `<strong>⭐ ${bid.user} (Tú)</strong>: $${formatNumber(bid.amount)}`;
+                            html = `<strong>${bid.user} (Tú)</strong> ${formatNumber(bid.amount)}`;
                         } else {
-                            html = `<strong>${bid.user}</strong>: $${formatNumber(bid.amount)}`;
+                            html = `<strong>${bid.user}</strong> ${formatNumber(bid.amount)}`;
                         }
+                        html += `<span class="text-muted float-end">${bid.time}</span>`;
                         
-                        html += ` <span class="text-muted float-end">${bid.time}</span>`;
                         li.innerHTML = html;
                         bidsList.appendChild(li);
                     });
                 } else {
                     bidsList.innerHTML = '<li class="list-group-item text-muted">No hay pujas aún</li>';
+                    }
                 }
             })
-            .catch(error => {
-                console.error('Error fetching bids:', error);
-            });
+            .catch(error => console.error('Error fetching bids:', error));
     }
     
     // Función para obtener el estado del producto
@@ -580,6 +728,11 @@
             if (data.success) {
                 amountInput.value = '';
                 document.getElementById('bid-preview').innerHTML = '';
+
+                // Mensaje diferente para subastas silenciosas
+                if (data.is_silent) {
+                    alert(data.message + (data.note ? '\n' + data.note : ''));
+                }
 
                 // Activar tiempo de espera de 2 segundos
                 startCooldown(2000);
