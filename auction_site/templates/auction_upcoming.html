@@ -11,6 +11,16 @@
                 <img src="{{ product.image.url }}" class="img-fluid rounded mb-4" alt="{{ product.name }}" style="max-height: 300px;">
                 
                 <h3>{{ product.name }}</h3>
+
+                {% if product.is_silent_auction %}
+                <div class="mb-2">
+                    <span class="badge bg-info fs-6">🤫 Subasta Silenciosa</span>
+                </div>
+                <div class="alert alert-light">
+                    <small>En esta subasta no verás las pujas de otros hasta que finalice</small>
+                </div>
+                {% endif %}
+                
                 <p class="lead">{{ product.description }}</p>
                 
                 <div class="alert alert-info">
