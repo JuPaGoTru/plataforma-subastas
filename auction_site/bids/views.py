@@ -62,7 +62,12 @@ def product_detail(request, product_id):
                 del request.session['username']
             return redirect('join_auction', product_id=product_id)
     
-    bids = Bid.objects.filter(product=product).select_related('guest_user').order_by('-created_at')[:10]
+    if product.is_silent_auction:
+        # Silenciosas: Por monto desc, luego tiempo asc (primero en llegar gana en empate)
+        bids = Bid.objects.filter(product=product).select_related('guest_user').order_by('-amount', 'created_at')[:10]
+    else:
+        # Normales: Por tiempo desc (más reciente primero)
+        bids = Bid.objects.filter(product=product).select_related('guest_user').order_by('-created_at')[:10]
     
     return render(request, 'product_detail.html', {
         'product': product,
@@ -234,16 +239,91 @@ def change_username(request, product_id):
 
 @require_http_methods(["GET"])
 def get_bids_data(request, product_id):
-     # Optimizado: traer solo los campos necesarios del producto
-    product = Product.objects.only('id', 'current_price').get(id=product_id)
+    product = Product.objects.get(id=product_id)
     
-    # Traer las últimas 5 pujas con el usuario relacionado
+    #Manejo de subastas silenciosas
+    if product.is_silent_auction:
+        # Si la subasta está en curso, solo mostrar la puja del usuario actual
+        if product.is_ongoing:
+            username = request.session.get('username')
+            
+            if username:
+                try:
+                    guest_user = GuestUser.objects.get(username=username)
+                    user_bid = Bid.get_user_latest_bid(product, guest_user)
+                    
+                    if user_bid:
+                        return JsonResponse({
+                            'bids': [{
+                                'user': 'Tu puja actual',
+                                'amount': user_bid.amount,
+                                'amount_formatted': user_bid.amount_formatted,
+                                'time': user_bid.created_at.strftime('%H:%M:%S'),
+                                'is_own_bid': True
+                            }],
+                            'current_price': product.starting_price,  # Mostrar precio inicial
+                            'current_price_formatted': product.starting_price_formatted,
+                            'is_silent': True,
+                            'is_ongoing': True,
+                            'message': '🤫 Subasta silenciosa - Solo ves tu puja'
+                        })
+                    else:
+                        return JsonResponse({
+                            'bids': [],
+                            'current_price': product.starting_price,
+                            'current_price_formatted': product.starting_price_formatted,
+                            'is_silent': True,
+                            'is_ongoing': True,
+                            'message': 'Aún no has pujado'
+                        })
+                except GuestUser.DoesNotExist:
+                    return JsonResponse({
+                        'bids': [],
+                        'current_price': product.starting_price,
+                        'current_price_formatted': product.starting_price_formatted,
+                        'is_silent': True,
+                        'is_ongoing': True,
+                        'message': 'Únete para pujar'
+                    })
+            
+            return JsonResponse({
+                'bids': [],
+                'current_price': product.starting_price,
+                'current_price_formatted': product.starting_price_formatted,
+                'is_silent': True,
+                'is_ongoing': True,
+                'message': 'Subasta silenciosa - Únete para pujar'
+            })
+        
+        # Si la subasta finalizó, mostrar top 10
+        elif product.is_finished:
+            bids = Bid.objects.filter(
+                product_id=product_id
+            ).select_related('guest_user').order_by('-amount', 'created_at')[:10]
+            
+            bids_data = [{
+                'user': bid.guest_user.username,
+                'amount': bid.amount,
+                'amount_formatted': bid.amount_formatted,
+                'time': bid.created_at.strftime('%H:%M:%S'),
+                'rank': index + 1,
+                'is_winner': index == 0
+            } for index, bid in enumerate(bids)]
+            
+            return JsonResponse({
+                'bids': bids_data,
+                'current_price': product.current_price,
+                'current_price_formatted': product.current_price_formatted,
+                'is_silent': True,
+                'is_ongoing': False,
+                'message': '🏆 Subasta finalizada - Top 10 pujas'
+            })
+    
+    # Subasta normal (tu código original)
     bids = Bid.objects.filter(
         product_id=product_id
-    ).select_related(
-        'guest_user'
-    ).order_by('-created_at')[:10]
-
+    ).select_related('guest_user').order_by('-created_at')[:10]
+    
     bids_data = [{
         'user': bid.guest_user.username,
         'amount': bid.amount,
@@ -254,7 +334,8 @@ def get_bids_data(request, product_id):
     return JsonResponse({
         'bids': bids_data,
         'current_price': product.current_price,
-        'current_price_formatted': product.current_price_formatted
+        'current_price_formatted': product.current_price_formatted,
+        'is_silent': False
     })
 
 class SubmitBidView(View):
@@ -262,79 +343,112 @@ class SubmitBidView(View):
         try:
             data = json.loads(request.body)
             amount = data.get('amount')
-
+            
             if not amount:
                 return JsonResponse({'success': False, 'error': 'Monto de puja no proporcionado.'})
-
+            
             try:
                 amount = int(amount)
             except ValueError:
                 return JsonResponse({'success': False, 'error': 'Monto inválido.'})
-
-            # Usar transacción atómica con select_for_update
+            
             with transaction.atomic():
-                # Bloquear el producto para evitar race conditions
                 product = Product.objects.select_for_update().get(id=product_id)
                 
-                # Validar que la subasta esté activa
                 if not product.is_ongoing:
                     return JsonResponse({
                         'success': False,
                         'error': 'La subasta no está activa.'
                     })
-
-                # Validar que la puja sea mayor al precio actual
-                if amount <= product.current_price:
-                    return JsonResponse({
-                        'success': False,
-                        'error': f'La puja debe ser mayor a {product.current_price:,}.'
-                    })
-
-                # Validar límite máximo
-                if amount > 512000000:
-                    return JsonResponse({
-                        'success': False,
-                        'error': 'El monto excede el límite permitido.'
-                    })
-
-                # Obtener o validar el usuario
+                
+                # Obtener usuario
                 username = request.session.get('username')
                 if not username:
                     return JsonResponse({
                         'success': False,
                         'error': 'Debes unirte a la subasta primero.'
                     })
-
+                
                 guest_user = GuestUser.objects.filter(username=username).first()
                 if not guest_user:
                     return JsonResponse({
                         'success': False,
                         'error': 'Usuario no encontrado.'
                     })
-
-                # Guardar precio anterior ANTES de extender
-                previous_price = product.current_price
                 
-                # Extender subasta si es necesario
+                # 🆕 NUEVO: Lógica para subastas silenciosas
+                if product.is_silent_auction:
+                    # En subastas silenciosas, validar solo contra precio inicial
+                    if amount <= product.starting_price:
+                        return JsonResponse({
+                            'success': False,
+                            'error': f'La puja debe ser mayor a {product.starting_price:,}.'
+                        })
+                    
+                    # Validar límite máximo
+                    if amount > 512000000:
+                        return JsonResponse({
+                            'success': False,
+                            'error': 'El monto excede el límite permitido.'
+                        })
+                    
+                    # Obtener puja anterior del usuario (si existe)
+                    previous_bid = Bid.get_user_latest_bid(product, guest_user)
+                    
+                    # Crear nueva puja
+                    new_bid = Bid.objects.create(
+                        product=product,
+                        guest_user=guest_user,
+                        amount=amount
+                    )
+                    
+                    # Actualizar current_price solo si es la puja más alta
+                    if amount > product.current_price:
+                        product.current_price = amount
+                    
+                    product.save()
+                    
+                    message = 'Puja actualizada exitosamente' if previous_bid else 'Puja registrada exitosamente'
+                    
+                    return JsonResponse({
+                        'success': True,
+                        'message': message,
+                        'new_price': amount,
+                        'is_silent': True,
+                        'note': 'Conocerás el resultado al finalizar la subasta'
+                    })
+                
+                # 🔄 CÓDIGO ORIGINAL para subastas normales (no tocar)
+                if amount <= product.current_price:
+                    return JsonResponse({
+                        'success': False,
+                        'error': f'La puja debe ser mayor a {product.current_price:,}.'
+                    })
+                
+                if amount > 512000000:
+                    return JsonResponse({
+                        'success': False,
+                        'error': 'El monto excede el límite permitido.'
+                    })
+                
+                previous_price = product.current_price
                 extended = product.extend_auction_if_needed(amount, previous_price)
-
-                # Crear la nueva puja
+                
                 new_bid = Bid.objects.create(
                     product=product,
                     guest_user=guest_user,
                     amount=amount
                 )
-
-                # Actualizar el precio actual del producto
+                
                 product.current_price = amount
                 product.save()
-
+                
                 return JsonResponse({
                     'success': True,
                     'new_price': amount,
                     'message': 'Puja realizada con éxito'
                 })
-
+                
         except Product.DoesNotExist:
             return JsonResponse({
                 'success': False,
@@ -358,7 +472,8 @@ def get_product_status(request, product_id):
             'time_remaining': product.time_remaining,
             'current_price': product.current_price,
             'is_ongoing': product.is_ongoing,
-            'end_time': product.end_time.isoformat()
+            'end_time': product.end_time.isoformat(),
+            'is_silent_auction': product.is_silent_auction,
         })
     except Product.DoesNotExist:
         return JsonResponse({'error': 'Producto no encontrado'}, status=404)
