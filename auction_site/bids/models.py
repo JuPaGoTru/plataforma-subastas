@@ -14,6 +14,11 @@ class Product(models.Model):
     is_active = models.BooleanField(default=True)
     created_at = models.DateTimeField(auto_now_add=True)
     anti_sniping_active = models.BooleanField(default=False)
+    is_silent_auction = models.BooleanField(
+        default=False,
+        verbose_name="Subasta Silenciosa",
+        help_text="En subastas silenciosas, los usuarios no ven las pujas de otros hasta que termine"
+    )
 
     class Meta:
         # ✅ AGREGAR índices compuestos para queries complejas
@@ -58,6 +63,8 @@ class Product(models.Model):
     @property
     def is_in_anti_sniping_period(self):
         """Verifica si está en el período de anti-sniping (últimos 30 segundos)"""
+        if self.is_silent_auction:
+            return False
         return self.is_ongoing and self.time_remaining <= 30
     
     @property
@@ -68,6 +75,8 @@ class Product(models.Model):
         1. Quedan <= 30 segundos, O
         2. El modo anti-sniping fue activado por una puja (y aún está en curso)
         """
+        if self.is_silent_auction:
+            return False
         if not self.is_ongoing:
             return False
         return self.is_in_anti_sniping_period or self.anti_sniping_active
@@ -106,6 +115,9 @@ class Product(models.Model):
         Solo extiende si el incremento de la puja es de al menos 1,000,000
         NO hace save() - esto lo maneja la vista dentro de la transacción
         """
+        if self.is_silent_auction:
+            return False
+        
         increment = bid_amount - previous_price
         if self.is_in_anti_sniping_period and increment >= 1000000:
             self.end_time += datetime.timedelta(seconds=30)
@@ -165,11 +177,19 @@ class Bid(models.Model):
         return f"{self.amount:,}".replace(",", ".")
     
     class Meta:
-        ordering = ['-created_at']
+        ordering = ['-amount', 'created_at']
         # ✅ Índice compuesto para queries de pujas por producto
         indexes = [
             models.Index(fields=['product', '-created_at'], name='product_bids_idx'),
         ]
+    
+    @staticmethod
+    def get_user_latest_bid(product, guest_user):
+        """Obtiene la última puja del usuario en una subasta"""
+        return Bid.objects.filter(
+            product=product,
+            guest_user=guest_user
+        ).order_by('-created_at').first()
     
     def __str__(self):
         if self.user:
