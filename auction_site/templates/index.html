@@ -9,9 +9,18 @@
             <img src="{{ product.image.url }}" class="card-img-top" alt="{{ product.name }}" style="height: 200px; object-fit: cover;">
             <div class="card-body">
                 <h5 class="card-title">{{ product.name }}</h5>
+                {% if product.is_silent_auction %}
+                <span class="badge bg-info mb-2">🤫 Silenciosa</span>
+                {% endif %}
                 <p class="card-text">{{ product.description|truncatewords:20 }}</p>
                 <p class="card-text">
-                    <strong>Precio actual: ${{ product.current_price }}</strong>
+                    <strong>Precio actual: 
+                    {% if product.is_silent_auction %}
+                        <span class="text-muted">Oculto</span>
+                    {% else %}
+                        {{ product.current_price }}
+                    {% endif %}
+                    </strong>
                     <span class="badge bg-success float-end">En Curso</span>
                 </p>
                 <p class="card-text">
@@ -38,6 +47,9 @@
             <img src="{{ product.image.url }}" class="card-img-top" alt="{{ product.name }}" style="height: 200px; object-fit: cover;">
             <div class="card-body">
                 <h5 class="card-title">{{ product.name }}</h5>
+                {% if product.is_silent_auction %}
+                <span class="badge bg-info mb-2">🤫 Silenciosa</span>
+                {% endif %}
                 <p class="card-text">{{ product.description|truncatewords:20 }}</p>
                 <p class="card-text">
                     <strong>Precio inicial: ${{ product.starting_price }}</strong>
