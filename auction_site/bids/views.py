@@ -379,7 +379,7 @@ class SubmitBidView(View):
                 # 🆕 NUEVO: Lógica para subastas silenciosas
                 if product.is_silent_auction:
                     # En subastas silenciosas, validar solo contra precio inicial
-                    if amount <= product.starting_price:
+                    if amount < product.starting_price:
                         return JsonResponse({
                             'success': False,
                             'error': f'La puja debe ser mayor a {product.starting_price:,}.'
@@ -392,31 +392,52 @@ class SubmitBidView(View):
                             'error': 'El monto excede el límite permitido.'
                         })
                     
-                    # Obtener puja anterior del usuario (si existe)
-                    previous_bid = Bid.get_user_latest_bid(product, guest_user)
-                    
-                    # Crear nueva puja
-                    new_bid = Bid.objects.create(
+                    # 🆕 NUEVO: Buscar si el usuario ya tiene una puja en esta subasta
+                    existing_bid = Bid.objects.filter(
                         product=product,
-                        guest_user=guest_user,
-                        amount=amount
-                    )
+                        guest_user=guest_user
+                    ).first()
                     
-                    # Actualizar current_price solo si es la puja más alta
-                    if amount > product.current_price:
-                        product.current_price = amount
-                    
-                    product.save()
-                    
-                    message = 'Puja actualizada exitosamente' if previous_bid else 'Puja registrada exitosamente'
-                    
-                    return JsonResponse({
-                        'success': True,
-                        'message': message,
-                        'new_price': amount,
-                        'is_silent': True,
-                        'note': 'Conocerás el resultado al finalizar la subasta'
-                    })
+                    if existing_bid:
+                        # Actualizar puja existente
+                        old_amount = existing_bid.amount
+                        existing_bid.amount = amount
+                        existing_bid.created_at = timezone.now()  # Actualizar timestamp
+                        existing_bid.save()
+                        
+                        # Actualizar current_price si es necesario
+                        max_bid = Bid.objects.filter(product=product).order_by('-amount').first()
+                        if max_bid:
+                            product.current_price = max_bid.amount
+                            product.save()
+                        
+                        return JsonResponse({
+                            'success': True,
+                            'message': 'Puja actualizada correctamente',
+                            'note': f'${old_amount:,} → ${amount:,}',
+                            'new_price': amount,
+                            'is_silent': True
+                        })
+                    else:
+                        # Crear nueva puja
+                        new_bid = Bid.objects.create(
+                            product=product,
+                            guest_user=guest_user,
+                            amount=amount
+                        )
+                        
+                        # Actualizar current_price solo si es la puja más alta
+                        if amount > product.current_price:
+                            product.current_price = amount
+                            product.save()
+                        
+                        return JsonResponse({
+                            'success': True,
+                            'message': 'Puja registrada correctamente',
+                            'note': 'Puedes modificarla en cualquier momento',
+                            'new_price': amount,
+                            'is_silent': True
+                        })
                 
                 # 🔄 CÓDIGO ORIGINAL para subastas normales (no tocar)
                 if amount <= product.current_price:
