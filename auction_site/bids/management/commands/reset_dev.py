@@ -51,7 +51,5 @@ class Command(BaseCommand):
         
         # 3. Resumen final
         self.stdout.write(self.style.SUCCESS('\n🎉 ¡Reset completado!'))
-        self.stdout.write(self.style.MIGRATE_HEADING('\n🚀 Iniciando servidor de desarrollo...\n'))
+        self.stdout.write('Puedes iniciar sesión en /admin con las credenciales proporcionadas.')
         
-        # 4. Iniciar servidor
-        call_command('runserver')
