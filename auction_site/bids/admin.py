@@ -3,8 +3,24 @@ from .models import Product, Bid, BannedIP
 
 @admin.register(Product)
 class ProductAdmin(admin.ModelAdmin):
-    list_display = ['name', 'starting_price', 'current_price', 'start_time', 'end_time', 'status', 'is_active']
-    list_filter = ['is_active', 'start_time', 'end_time', 'created_at']
+    list_display = [
+        'name', 
+        'starting_price', 
+        'current_price', 
+        'start_time', 
+        'end_time', 
+        'status', 
+        'is_active',
+        'is_silent_auction',
+        'anti_sniping_active'
+    ]
+    list_filter = [
+        'is_active', 
+        'start_time', 
+        'end_time',
+        'is_silent_auction', 
+        'created_at'
+    ]
     
     def status(self, obj):
         return obj.status
