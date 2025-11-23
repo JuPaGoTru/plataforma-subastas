@@ -8,3 +8,6 @@ redis==6.4.0
 sqlparse==0.5.3
 tzdata==2025.2
 python-decouple==3.8
+dj-database-url
+psycopg2-binary
+Pillow
