@@ -174,8 +174,8 @@
                 <h3>{% if product.is_finished %}Historial de pujas{% else %}Últimas pujas{% endif %}</h3>
             </div>
             <ul id="bids-list" class="list-group list-group-flush">
-                {% if product.is_finished and product.is_silent_auction %}
-                <!-- 🆕 NUEVO: Top 10 con rankings en subastas silenciosas finalizadas -->
+            {% if product.is_finished and product.is_silent_auction %}
+                <!-- Top 10 con rankings en subastas silenciosas FINALIZADAS -->
                 <li class="list-group-item active">
                     <strong>🏆 Top 10 Pujas</strong>
                 </li>
@@ -198,8 +198,15 @@
                 {% empty %}
                 <li class="list-group-item text-muted">No hubo pujas en esta subasta</li>
                 {% endfor %}
+                
+            {% elif product.is_silent_auction and product.is_ongoing %}
+                <!-- 🆕 NUEVO: Subasta silenciosa ACTIVA - Ocultar pujas desde el servidor -->
+                <li class="list-group-item text-center text-muted py-4">
+                    <em>🤫 Las pujas están ocultas hasta que finalice la subasta</em>
+                </li>
+                
             {% else %}
-                <!-- Subasta normal o activa - mostrar formato original -->
+                <!-- Subasta NORMAL - mostrar últimas 10 pujas -->
                 {% for bid in bids %}
                 <li class="list-group-item {% if bid.guest_user.username == username %}list-group-item-success{% endif %} {% if forloop.first and product.is_finished %}list-group-item-warning{% endif %}">
                     {% if bid.guest_user.username == username %}
@@ -216,7 +223,8 @@
                 <li class="list-group-item text-muted">No hay pujas aún</li>
                 {% endfor %}
             {% endif %}
-            </ul>
+        </ul>
+
         </div>
         
         <!-- Chat -->
